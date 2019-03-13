@@ -1,0 +1,580 @@
+<style type="text/css">
+	.fare-calculator {
+		width:400px;
+		border:2px solid lightgray;
+	}
+	
+	.fare-calculator img {
+		width:40px;
+		position:relative;
+		top:7px;
+	}
+	
+	.fare-calculator h1 {
+		margin:0;
+		padding:20px 0;
+	}
+	
+	.fare-calculator .invert {
+		font-size:24px;
+		color:white;
+		background:gray;
+		border-bottom:2px solid gray;
+		text-align:center;
+	}
+	
+	.fare-calculator div {
+		margin:0;
+		padding:20px 0;
+		border-bottom:2px solid lightgray;
+	}
+	
+	.fare-calculator label {
+		font-size:20px;
+		margin:0 0 20px;
+		display:block;
+		text-align:center;
+	}
+	
+	.fare-calculator select {
+		font-size:20px;
+		width:90%;
+		display:block;
+		margin:0 auto;
+	}
+	
+	.fare-calculator .info {
+		display:inline-block;
+		padding:20px 40px 0 40px;
+	}
+	
+	.fare-calculator ul {
+		width:50%;
+		margin:0 auto;
+		list-style-type:none;
+	}
+	
+	.fare-calculator label[for="advance"],
+	.fare-calculator label[for="onboard"] {
+		text-align:left;
+		margin:20px 0 0 0;
+	}
+	
+	.fare-calculator input[name="place"] {
+		float:left;
+		margin-right:10px;
+	}
+	
+	.fare-calculator input[name="place"][disabled] + label {
+		color:lightgray;
+	}
+	
+	.fare-calculator .trips {
+		display:block;
+		padding-top:5px;
+		font-style:italic;
+		text-align:center;
+	}
+	
+	.fare-calculator input[type="number"] {
+		width:20%;
+		font-size:20px;
+		text-align:center;
+		display:block;
+		margin:0 auto;
+		height:40px;
+	}
+	
+	.fare-calculator .total {
+		font-size:48px;
+		font-weight:bold;
+	}
+</style>
+
+<aside class="fare-calculator">
+	<h1 class="invert">
+		<img class="logo" src="https://upload.wikimedia.org/wikipedia/commons/c/ca/SEPTA.svg" />
+		Regional Rails Fares
+	</h1>
+	
+	<div>
+		<label for="where">Where are you going?</label>
+		<select id="where" data-hook="where"></select>
+	</div>
+	
+	<div>
+		<label for="when">When are you going?</label>
+		<select id="when" data-hook="when"></select>
+		<span class="info" data-hook="info"></span>
+	</div>
+	
+	<div>
+		<label>Where will you purchase the fare?</label>
+		<ul>
+			<li>
+				<input id="advance" data-hook="place" name="place" type="radio" value="advance_purchase" />
+				<label for="advance">Station Kiosk</label>
+			</li>
+			<li>
+				<input id="onboard" data-hook="place" name="place" type="radio" value="onboard_purchase" checked="checked" />
+				<label for="onboard">Onboard</label>
+			</li>
+		</ul>
+	</div>
+	
+	<div>
+		<label for="rides">How many rides will you need?</label>
+		<input id="rides" data-hook="rides" type="number" min="1" step="1" value="1" />
+		<span class="trips" data-hook="trips"></span>
+	</div>
+	
+	<div class="invert">
+		<span>Your fare will cost</span><br />
+		<span class="total" data-hook="total"></span>
+	</div>
+</aside>
+
+<script type="text/javascript">
+	(function() {
+
+		// Regional Rails object
+		var rr = {
+		
+			// Reformatted data
+			zone: {},
+			
+			// Generic info
+			info: {},
+			
+			// HTML behavorial hooks
+			hook: {
+				where: document.querySelector('[data-hook="where"]'),
+				when:  document.querySelector('[data-hook="when"]'),
+				info:  document.querySelector('[data-hook="info"]'),
+				place: document.querySelectorAll('[data-hook="place"]'),
+				rides: document.querySelector('[data-hook="rides"]'),
+				trips: document.querySelector('[data-hook="trips"]'),
+				total: document.querySelector('[data-hook="total"]'),
+			},
+			
+			// Initializa the widget
+			init: function(json) {
+			
+				// Reformat the JSON to be more useful
+				rr.reformat(json);
+				
+				// Create widget options
+				rr.options();
+				
+				// Setup event handlers
+				rr.events();
+				
+				// Calculate initial total cost
+				rr.total();
+			},
+			
+			// Reformat JSON into data structure with easier access to fare pricing
+			reformat: function(json) {
+			
+				// Loop thru each zone
+				for (var i in json.zones) {
+				
+					// Extract zone value
+					var where = json.zones[i].zone;
+					
+					// Store each zone by value with a name and time obj
+					rr.zone[where] = { 
+						name: json.zones[i].name,
+						time: {},
+					};
+					
+					// Loop thru each of the zones fares
+					for (var j in json.zones[i].fares) {
+					
+						// Extract zone fare info
+						var fare = json.zones[i].fares[j];
+						
+						// Create obj for each fare type (time/day) and fare purchase place (at)
+						rr.zone[where].time[fare.type] = rr.zone[where].time[fare.type] || { at: {} };
+						
+						// Store far price and trips per fare
+						rr.zone[where].time[fare.type].at[fare.purchase] = {
+							trips: fare.trips,
+							price: fare.price,
+						};
+					}
+					
+				}
+				
+				// Store generic info as-is
+				rr.info = json.info;
+			},
+			
+			// Create widget select options
+			options: function() {
+			
+				// Helper function to create option elements
+				var create = function(text, value, parent) {
+					var option = document.createElement('option');
+					option.text = text;
+					option.value = value;
+					parent.appendChild(option);
+				};
+				
+				// Loop thru zones
+				for (var where in rr.zone) {
+				
+					// Create where options
+					create(rr.zone[where].name, where, rr.hook.where);
+					
+					// Loop thru times
+					for (var when in rr.zone[where].time) {
+						
+						// If option doesn't already exist
+						if (!rr.hook.when.querySelector('option[value="' + when + '"]')) {
+							
+							// More readable option text
+							var text = (when.charAt(0).toUpperCase() + when.slice(1)).replace('_', ' ');
+							
+							// Create when options
+							create(text, when, rr.hook.when);
+						}
+					}
+				}
+				
+				// Display when info
+				rr.hook.info.innerHTML = rr.info[rr.hook.when.value];
+					
+				// Add radio button title info
+				[].forEach.call(rr.hook.place, function(place) {
+					place.title = rr.info[place.value];
+				});
+			},
+			
+			// Bind event handlers
+			events: function() {		
+
+				// Bind where change events, Anytime trips per fare varies with zone
+				rr.hook.where.addEventListener('change', function(e) {
+					// Calculate trips per fare
+					rr.trips();
+					
+					// Update total cost
+					rr.total();
+				});
+				
+				// Bind when change events, Anytime trips per fare varies with time
+				rr.hook.when.addEventListener('change', function(e) {
+					// Calculate trips per fare
+					rr.trips();
+					
+					// Update total cost
+					rr.total();
+				});
+				
+				// Bind update event to each radio button change, Anytime trips per fare varies with place
+				[].forEach.call(rr.hook.place, function(place) {
+					place.addEventListener('change', function(e) {
+						// Calculate trips per fare
+						rr.trips();
+						
+						// Update total cost
+						rr.total();
+					});
+				});
+				
+				// Rides change events only need to update total cost
+				rr.hook.rides.addEventListener('change', rr.total);
+			},
+			
+			// Calculate the number of trips per fare
+			trips: function() {
+			
+				// Store when current value
+				var when = rr.hook.when.value;
+				
+				// Store where current value
+				var where = rr.hook.where.value;
+				
+				// 
+				//var place = document.querySelector('[data-hook="place"]:checked');
+				
+				// User selected number of trips
+				var rides = parseInt(rr.hook.rides.value);
+				
+				// Trips per fare
+				var trips;
+
+				// Display when info
+				rr.hook.info.innerHTML = rr.info[when];
+				
+				// Enable only valid place options
+				[].forEach.call(rr.hook.place, function(place) {
+					// Place is defined at zone/time
+					place.disabled = (rr.zone[where].time[when].at[place.value]) ? false : true;
+					//place.checked = (place.disabled) ? false : true;
+					//place.checked = false;
+				});
+				
+				// No place checked
+				if (!document.querySelector('[data-hook="place"]:not([disabled]):checked')) {
+					// Select first enabled place
+					document.querySelector('[data-hook="place"]:not([disabled])').checked = true;
+				}
+				
+				// Extract the trips per fare
+				trips = rr.zone[where].time[when].at[document.querySelector('[data-hook="place"]:checked').value].trips;
+				
+				// Display note about rides per fare
+				rr.hook.trips.innerHTML = (trips > 1) ? 'Only sold in ' + trips + ' ride increment' : '';
+				
+				// Set the input elements step and min attributes
+				rr.hook.rides.step = rr.hook.rides.min = trips;
+				
+				
+				// Round up to nearest whole trips per fare
+				
+				// NOTE: this only works with factors of 10 trips
+				//rr.hook.rides.value = Math.ceil(parseInt(rr.hook.rides.value) / trips) * trips;
+				
+				// FIXED: works with any increment of trips per fare, Test Zone NY, Anytime
+				// 1 trip per fare requires no adjustment
+				// rides already an increment of trips per fare requires no adjustment
+				if (trips > 1 && (rides % trips) > 0) {
+					rr.hook.rides.value = rides + (trips - (rides % trips));
+				}
+			},
+
+			// Calculate price per trip
+			price: function() {
+			
+				// Current option values
+				var where = rr.hook.where.value;
+				var when  = rr.hook.when.value;
+				var place = document.querySelector('[data-hook="place"]:checked').value;
+				
+				// Extract price and trips per fare
+				var trips = rr.zone[where].time[when].at[place].trips;
+				var price = rr.zone[where].time[when].at[place].price;
+				
+				// Return price per trip
+				return price / trips;
+			},
+			
+			// Update widget total cost display
+			total: function() {
+			
+				// Calculate price per trip * current number of rides
+				rr.hook.total.innerHTML = '$' + ((rr.price() * rr.hook.rides.value).toFixed(2) || 0);
+			},
+		};
+		
+		/*
+		// create XML HTML request object and GET fares JSON
+		var xhr = window.XMLHttpRequest ? new XMLHttpRequest() : new ActiveXObject("Microsoft.XMLHTTP");
+		xhr.open('GET', 'http://local.septa.com/fares.json', true);
+		xhr.send();
+		xhr.onreadystatechange = function() {
+			if (xhr.readyState === 4 && xhr.status === 200) {
+				// parse JSON response and initialize Regional Rail widget
+				rr.init(JSON.parse(xhr.responseText));
+			}
+		}
+		*/
+		var fares = {
+			"info": {
+				"anytime": "Valid anytime",
+				"weekday": "Valid Monday through Friday, 4:00 a.m. - 7:00 p.m. On trains arriving or departing 30th Street Station, Suburban and Jefferson Station",
+				"evening_weekend": "Valid weekdays after 7:00 p.m.; all day Saturday, Sunday and major holidays. On trains arriving or departing 30th Street Station, Suburban and Jefferson Station",
+				"advance_purchase": "Tickets available for purchase at all SEPTA offices.",
+				"onboard_purchase": "Tickets available for purchase from a train conductor aboard SEPTA regional rail trains."
+			},
+			"zones": [{
+				"name": "CCP/1",
+				"zone": 1,
+				"fares": [{
+					"type": "weekday",
+					"purchase": "advance_purchase",
+					"trips": 1,
+					"price": 4.75
+				}, {
+					"type": "weekday",
+					"purchase": "onboard_purchase",
+					"trips": 1,
+					"price": 6.00
+				}, {
+					"type": "evening_weekend",
+					"purchase": "advance_purchase",
+					"trips": 1,
+					"price": 3.75
+				}, {
+					"type": "evening_weekend",
+					"purchase": "onboard_purchase",
+					"trips": 1,
+					"price": 5.00
+				}, {
+					"type": "anytime",
+					"purchase": "advance_purchase",
+					"trips": 10,
+					"price": 38.00
+				}]
+			}, {
+				"name": "Zone 2",
+				"zone": 2,
+				"fares": [{
+					"type": "weekday",
+					"purchase": "advance_purchase",
+					"trips": 1,
+					"price": 4.75
+				}, {
+					"type": "weekday",
+					"purchase": "onboard_purchase",
+					"trips": 1,
+					"price": 6.00
+				}, {
+					"type": "evening_weekend",
+					"purchase": "advance_purchase",
+					"trips": 1,
+					"price": 3.75
+				}, {
+					"type": "evening_weekend",
+					"purchase": "onboard_purchase",
+					"trips": 1,
+					"price": 5.00
+				}, {
+					"type": "anytime",
+					"purchase": "advance_purchase",
+					"trips": 10,
+					"price": 45.00
+				}]
+			}, {
+				"name": "Zone 3",
+				"zone": 3,
+				"fares": [{
+					"type": "weekday",
+					"purchase": "advance_purchase",
+					"trips": 1,
+					"price": 5.75
+				}, {
+					"type": "weekday",
+					"purchase": "onboard_purchase",
+					"trips": 1,
+					"price": 7.00
+				}, {
+					"type": "evening_weekend",
+					"purchase": "advance_purchase",
+					"trips": 1,
+					"price": 5.00
+				}, {
+					"type": "evening_weekend",
+					"purchase": "onboard_purchase",
+					"trips": 1,
+					"price": 7.00
+				}, {
+					"type": "anytime",
+					"purchase": "advance_purchase",
+					"trips": 10,
+					"price": 54.50
+				}]
+			}, {
+				"name": "Zone 4",
+				"zone": 4,
+				"fares": [{
+					"type": "weekday",
+					"purchase": "advance_purchase",
+					"trips": 1,
+					"price": 6.50
+				}, {
+					"type": "weekday",
+					"purchase": "onboard_purchase",
+					"trips": 1,
+					"price": 8.00
+				}, {
+					"type": "evening_weekend",
+					"purchase": "advance_purchase",
+					"trips": 1,
+					"price": 5.00
+				}, {
+					"type": "evening_weekend",
+					"purchase": "onboard_purchase",
+					"trips": 1,
+					"price": 7.00
+				}, {
+					"type": "anytime",
+					"purchase": "advance_purchase",
+					"trips": 10,
+					"price": 62.50
+				}]
+			}, {
+				"name": "NJ",
+				"zone": 5,
+				"fares": [{
+					"type": "weekday",
+					"purchase": "advance_purchase",
+					"trips": 1,
+					"price": 9.00
+				}, {
+					"type": "weekday",
+					"purchase": "onboard_purchase",
+					"trips": 1,
+					"price": 10.00
+				}, {
+					"type": "evening_weekend",
+					"purchase": "advance_purchase",
+					"trips": 1,
+					"price": 9.00
+				}, {
+					"type": "evening_weekend",
+					"purchase": "onboard_purchase",
+					"trips": 1,
+					"price": 10.00
+				}, {
+					"type": "anytime",
+					"purchase": "advance_purchase",
+					"trips": 10,
+					"price": 80.00
+				}]
+			},
+			// Test Zone, Test Anytime trips increments
+			{
+				"name": "NY",
+				"zone": 6,
+				"fares": [{
+					"type": "weekday",
+					"purchase": "advance_purchase",
+					"trips": 1,
+					"price": 9.00
+				}, {
+					"type": "weekday",
+					"purchase": "onboard_purchase",
+					"trips": 1,
+					"price": 10.00
+				}, {
+					"type": "evening_weekend",
+					"purchase": "advance_purchase",
+					"trips": 1,
+					"price": 9.00
+				}, {
+					"type": "evening_weekend",
+					"purchase": "onboard_purchase",
+					"trips": 1,
+					"price": 10.00
+				}, {
+					"type": "anytime",
+					"purchase": "advance_purchase",
+					"trips": 12,
+					"price": 80.00
+				}, {
+					"type": "anytime",
+					"purchase": "onboard_purchase",
+					"trips": 15,
+					"price": 90.00
+				}]
+			}]
+		};
+		
+		rr.init(fares);
+	})();
+</script>
+
+
